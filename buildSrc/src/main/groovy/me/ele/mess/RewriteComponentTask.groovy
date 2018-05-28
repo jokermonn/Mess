@@ -15,8 +15,6 @@ import java.nio.charset.StandardCharsets
 
 class RewriteComponentTask extends DefaultTask {
 
-    static final String CHARSET = StandardCharsets.UTF_8.name()
-
     @Input
     ApkVariant apkVariant
 
@@ -27,10 +25,7 @@ class RewriteComponentTask extends DefaultTask {
     void rewrite() {
         println "start rewrite task"
 
-        Map<String, String> map = new TreeMap<>({ pre, next ->
-          def i = next.length() - pre.length()
-          return i != 0 ? i : 1
-        })
+        Map<String, String> map = [:]
         MappingReader reader = new MappingReader(apkVariant.mappingFile)
         reader.pump(new MappingProcessor() {
             @Override
@@ -53,18 +48,25 @@ class RewriteComponentTask extends DefaultTask {
         // AndroidManifest.xml
         String realPath = "${project.buildDir.absolutePath}/intermediates/manifests/full/${getSubResPath()}/AndroidManifest.xml"
         def f = new File(realPath)
+
         def parser = new XmlParser(false, false).parse(f)
+        def name = ""
+
         parser.application.each {
-            if (map.containsKey(it.@"android:name")) {
-                it.@"android:name" = map.get(it.@"android:name")
+          name = it.@"android:name"
+          if (map.containsKey(name)) {
+            it.@"android:name" = map.get(name)
+          }
+          it.children().each {
+            name = it.@"android:name"
+            if (map.containsKey(name)) {
+              it.@"android:name" = map.get(name)
             }
-            it.children().each {
-                if (map.containsKey(it.@"android:name")) {
-                    it.@"android:name" = map.get(it.@"android:name")
-                }
-            }
+          }
         }
+
         new XmlNodePrinter(new PrintWriter(new FileWriter(f))).print(parser)
+
 
         long t0 = System.currentTimeMillis()
         File resDir = new File(getResPath())
@@ -74,15 +76,20 @@ class RewriteComponentTask extends DefaultTask {
             }
             if (dir.exists() && dir.isDirectory() && isLayoutsDir(dir.name)) {
                 dir.eachFileRecurse(FileType.FILES) { File file ->
-                    String orgTxt = file.getText(CHARSET)
-                    String newTxt = orgTxt
-                    map.each { k, v ->
-                        newTxt = newTxt.replace(k, v)
+                  parser = new XmlParser(false, false).parse(file)
+
+                  name = parser.name()
+                  if (map.containsKey(name)) {
+                    parser.name = map.get(name)
+                  }
+                  parser.each {
+                    name = it.name()
+                    if (map.containsKey(name)) {
+                      it.name = map.get(name)
                     }
-                    if (newTxt != orgTxt) {
-                        println 'rewrite file: ' + file.absolutePath
-                        file.setText(newTxt, CHARSET)
-                    }
+                  }
+
+                  new XmlNodePrinter(new PrintWriter(new FileWriter(file))).print(parser)
                 }
             }
         }
